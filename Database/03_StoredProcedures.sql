@@ -1,9 +1,92 @@
 -- ================================================
--- MAGACIN ERP SISTEM - STORED PROCEDURES (ISPRAVLJENO)
+-- MAGACIN ERP SISTEM - STORED PROCEDURES
 -- SQL Server 2022
 -- ================================================
 
-USE MagacinVinERP
+USE MagacinERP
+GO
+
+-- ================================================
+-- DELJENI UTILITY: AUDIT LOG
+-- Zamenjuje 7x duplirani INSERT INTO AuditLog blok
+-- ================================================
+CREATE PROCEDURE sp_LogAudit
+    @Tabela NVARCHAR(100),
+    @Akcija NVARCHAR(20),
+    @PrimarniKljuc NVARCHAR(100),
+    @NovaVrednost NVARCHAR(MAX),
+    @Korisnik NVARCHAR(100)
+AS
+BEGIN
+    INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
+    VALUES (@Tabela, @Akcija, @PrimarniKljuc, @NovaVrednost, @Korisnik)
+END
+GO
+
+-- ================================================
+-- DELJENI UTILITY: AŽURIRANJE ZALIHA
+-- Objedinjuje sp_AzurirajZaliheNakonPrijeme i sp_SmanjiZalihe
+-- @Smer: 1 = povećanje (prijema), -1 = smanjenje (izdavanje)
+-- ================================================
+CREATE PROCEDURE sp_AzurirajZalihe
+    @ArtikalID INT,
+    @LokacijaID INT,
+    @Kolicina INT,
+    @Smer INT,
+    @Korisnik NVARCHAR(100)
+AS
+BEGIN
+    BEGIN TRY
+        DECLARE @IznosPromene INT = @Kolicina * @Smer
+
+        IF EXISTS (SELECT 1 FROM Zalihe WHERE ArtikalID = @ArtikalID AND LokacijaID = @LokacijaID)
+        BEGIN
+            UPDATE Zalihe
+            SET Kolicina = Kolicina + @IznosPromene,
+                DisponibilnaKolicina = Kolicina + @IznosPromene - RezervovanoKolicina,
+                DatumZadnjeIzmene = GETDATE()
+            WHERE ArtikalID = @ArtikalID AND LokacijaID = @LokacijaID
+        END
+        ELSE IF @Smer = 1
+        BEGIN
+            INSERT INTO Zalihe (ArtikalID, LokacijaID, Kolicina, DisponibilnaKolicina)
+            VALUES (@ArtikalID, @LokacijaID, @Kolicina, @Kolicina)
+        END
+
+        DECLARE @Opis NVARCHAR(MAX) = CASE @Smer
+            WHEN 1 THEN 'Povećano za: '
+            ELSE 'Smanjeno za: '
+        END + CAST(@Kolicina AS NVARCHAR(100))
+
+        EXEC sp_LogAudit 'Zalihe', 'UPDATE', @ArtikalID, @Opis, @Korisnik
+    END TRY
+    BEGIN CATCH
+        DECLARE @Poruka NVARCHAR(200) = CASE @Smer
+            WHEN 1 THEN 'Greška pri povećanju zalihe'
+            ELSE 'Greška pri smanjenju zalihe'
+        END
+        RAISERROR(@Poruka, 16, 1)
+    END CATCH
+END
+GO
+
+-- ================================================
+-- DELJENI VIEW: VREDNOST ZALIHE
+-- Koristi se u sp_GetVrednostZalihe i sp_ABCAnaliza
+-- ================================================
+CREATE VIEW vw_VrednostZalihe
+AS
+    SELECT 
+        a.ArtikalID,
+        a.SifraArtikla,
+        a.NazivArtikla,
+        a.CenaKupovine,
+        SUM(z.Kolicina) AS UkupnaKolicina,
+        SUM(z.Kolicina) * a.CenaKupovine AS VrednostZalihe
+    FROM Zalihe z
+    INNER JOIN Artikli a ON z.ArtikalID = a.ArtikalID
+    WHERE a.Aktivan = 1
+    GROUP BY a.ArtikalID, a.SifraArtikla, a.NazivArtikla, a.CenaKupovine
 GO
 
 -- ================================================
@@ -23,9 +106,8 @@ BEGIN
         
         SET @PrijemaID = SCOPE_IDENTITY()
         
-        INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
-        VALUES ('PrijemaMaterijala', 'INSERT', CAST(@PrijemaID AS NVARCHAR(100)), 
-                'Broj: ' + @BrojDokumenta, @Korisnik)
+        EXEC sp_LogAudit 'PrijemaMaterijala', 'INSERT', @PrijemaID, 
+             @BrojDokumenta, @Korisnik
     END TRY
     BEGIN CATCH
         RAISERROR('Greška pri dodavanju prijeme', 16, 1)
@@ -50,9 +132,8 @@ BEGIN
         INSERT INTO PrijemaStavke (PrijemaID, ArtikalID, KolicinaNarudjena, CenaJedinice, LotBroj, DatumRoka)
         VALUES (@PrijemaID, @ArtikalID, @KolicinaNarudjena, @CenaJedinice, @LotBroj, @DatumRoka)
         
-        INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
-        VALUES ('PrijemaStavke', 'INSERT', CAST(@PrijemaID AS NVARCHAR(100)), 
-                'Artikal ID: ' + CAST(@ArtikalID AS NVARCHAR(100)), @Korisnik)
+        DECLARE @Opis NVARCHAR(MAX) = 'Artikal ID: ' + CAST(@ArtikalID AS NVARCHAR(100))
+        EXEC sp_LogAudit 'PrijemaStavke', 'INSERT', @PrijemaID, @Opis, @Korisnik
     END TRY
     BEGIN CATCH
         RAISERROR('Greška pri dodavanju stavke prijeme', 16, 1)
@@ -61,42 +142,7 @@ END
 GO
 
 -- ================================================
--- 3. PROCEDURE ZA AŽURIRANJE ZALIHA NAKON PRIJEME
--- ================================================
-CREATE PROCEDURE sp_AzurirajZaliheNakonPrijeme
-    @ArtikalID INT,
-    @LokacijaID INT,
-    @Kolicina INT,
-    @Korisnik NVARCHAR(100)
-AS
-BEGIN
-    BEGIN TRY
-        IF EXISTS (SELECT 1 FROM Zalihe WHERE ArtikalID = @ArtikalID AND LokacijaID = @LokacijaID)
-        BEGIN
-            UPDATE Zalihe
-            SET Kolicina = Kolicina + @Kolicina,
-                DisponibilnaKolicina = Kolicina + @Kolicina - RezervovanoKolicina,
-                DatumZadnjeIzmene = GETDATE()
-            WHERE ArtikalID = @ArtikalID AND LokacijaID = @LokacijaID
-        END
-        ELSE
-        BEGIN
-            INSERT INTO Zalihe (ArtikalID, LokacijaID, Kolicina, DisponibilnaKolicina)
-            VALUES (@ArtikalID, @LokacijaID, @Kolicina, @Kolicina)
-        END
-        
-        INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
-        VALUES ('Zalihe', 'UPDATE', CAST(@ArtikalID AS NVARCHAR(100)), 
-                'Kolicina: ' + CAST(@Kolicina AS NVARCHAR(100)), @Korisnik)
-    END TRY
-    BEGIN CATCH
-        RAISERROR('Greška pri ažuriranju zalihe', 16, 1)
-    END CATCH
-END
-GO
-
--- ================================================
--- 4. PROCEDURE ZA IZDAVANJE MATERIJALA
+-- 3. PROCEDURE ZA IZDAVANJE MATERIJALA
 -- ================================================
 CREATE PROCEDURE sp_DodajIzdavanje
     @BrojDokumenta NVARCHAR(50),
@@ -112,9 +158,8 @@ BEGIN
         
         SET @IzdavanjeID = SCOPE_IDENTITY()
         
-        INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
-        VALUES ('IzdavanjeMaterijala', 'INSERT', CAST(@IzdavanjeID AS NVARCHAR(100)), 
-                'Broj: ' + @BrojDokumenta, @Korisnik)
+        EXEC sp_LogAudit 'IzdavanjeMaterijala', 'INSERT', @IzdavanjeID,
+             @BrojDokumenta, @Korisnik
     END TRY
     BEGIN CATCH
         RAISERROR('Greška pri dodavanju izdavanja', 16, 1)
@@ -123,34 +168,7 @@ END
 GO
 
 -- ================================================
--- 5. PROCEDURE ZA SMANJENJE ZALIHA
--- ================================================
-CREATE PROCEDURE sp_SmanjiZalihe
-    @ArtikalID INT,
-    @LokacijaID INT,
-    @Kolicina INT,
-    @Korisnik NVARCHAR(100)
-AS
-BEGIN
-    BEGIN TRY
-        UPDATE Zalihe
-        SET Kolicina = Kolicina - @Kolicina,
-            DisponibilnaKolicina = Kolicina - @Kolicina - RezervovanoKolicina,
-            DatumZadnjeIzmene = GETDATE()
-        WHERE ArtikalID = @ArtikalID AND LokacijaID = @LokacijaID
-        
-        INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
-        VALUES ('Zalihe', 'UPDATE', CAST(@ArtikalID AS NVARCHAR(100)), 
-                'Smanjeno za: ' + CAST(@Kolicina AS NVARCHAR(100)), @Korisnik)
-    END TRY
-    BEGIN CATCH
-        RAISERROR('Greška pri smanjenju zalihe', 16, 1)
-    END CATCH
-END
-GO
-
--- ================================================
--- 6. PROCEDURE ZA TRANSFER MATERIJALA
+-- 4. PROCEDURE ZA TRANSFER MATERIJALA
 -- ================================================
 CREATE PROCEDURE sp_DodajTransfer
     @BrojDokumenta NVARCHAR(50),
@@ -167,9 +185,8 @@ BEGIN
         
         SET @TransferID = SCOPE_IDENTITY()
         
-        INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
-        VALUES ('Transferi', 'INSERT', CAST(@TransferID AS NVARCHAR(100)), 
-                'Broj: ' + @BrojDokumenta, @Korisnik)
+        EXEC sp_LogAudit 'Transferi', 'INSERT', @TransferID,
+             @BrojDokumenta, @Korisnik
     END TRY
     BEGIN CATCH
         RAISERROR('Greška pri dodavanju transfera', 16, 1)
@@ -178,7 +195,7 @@ END
 GO
 
 -- ================================================
--- 7. PROCEDURE ZA INVENTURU
+-- 5. PROCEDURE ZA INVENTURU
 -- ================================================
 CREATE PROCEDURE sp_DodajInventuru
     @BrojDokumenta NVARCHAR(50),
@@ -194,9 +211,8 @@ BEGIN
         
         SET @InventuraID = SCOPE_IDENTITY()
         
-        INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
-        VALUES ('Inventure', 'INSERT', CAST(@InventuraID AS NVARCHAR(100)), 
-                'Broj: ' + @BrojDokumenta, @Korisnik)
+        EXEC sp_LogAudit 'Inventure', 'INSERT', @InventuraID,
+             @BrojDokumenta, @Korisnik
     END TRY
     BEGIN CATCH
         RAISERROR('Greška pri dodavanju inventure', 16, 1)
@@ -205,7 +221,7 @@ END
 GO
 
 -- ================================================
--- 8. PROCEDURE ZA PREGLED DOSTUPNE ZALIHE
+-- 6. PROCEDURE ZA PREGLED DOSTUPNE ZALIHE
 -- ================================================
 CREATE PROCEDURE sp_GetDostupnaZaliha
     @ArtikalID INT
@@ -226,7 +242,7 @@ END
 GO
 
 -- ================================================
--- 9. PROCEDURE ZA PREGLED ZALIHE PO LOKACIJAMA
+-- 7. PROCEDURE ZA PREGLED ZALIHE PO LOKACIJAMA
 -- ================================================
 CREATE PROCEDURE sp_GetZalihaPoLokacijama
     @ArtikalID INT
@@ -246,7 +262,7 @@ END
 GO
 
 -- ================================================
--- 10. PROCEDURE ZA PREGLED ARTIKALA SA NISKOM ZALIJHOM
+-- 8. PROCEDURE ZA PREGLED ARTIKALA SA NISKOM ZALIJHOM
 -- ================================================
 CREATE PROCEDURE sp_GetArtikliSaNiskomZalijhom
 AS
@@ -268,27 +284,25 @@ END
 GO
 
 -- ================================================
--- 11. PROCEDURE ZA PREGLED VREDNOSTI ZALIHE
+-- 9. PROCEDURE ZA PREGLED VREDNOSTI ZALIHE
+-- Koristi deljeni vw_VrednostZalihe view
 -- ================================================
 CREATE PROCEDURE sp_GetVrednostZalihe
 AS
 BEGIN
     SELECT 
-        a.SifraArtikla,
-        a.NazivArtikla,
-        a.CenaKupovine,
-        SUM(z.Kolicina) AS UkupnaKolicina,
-        (SUM(z.Kolicina) * a.CenaKupovine) AS VrednostZalihe
-    FROM Zalihe z
-    INNER JOIN Artikli a ON z.ArtikalID = a.ArtikalID
-    WHERE a.Aktivan = 1
-    GROUP BY a.ArtikalID, a.SifraArtikla, a.NazivArtikla, a.CenaKupovine
+        SifraArtikla,
+        NazivArtikla,
+        CenaKupovine,
+        UkupnaKolicina,
+        VrednostZalihe
+    FROM vw_VrednostZalihe
     ORDER BY VrednostZalihe DESC
 END
 GO
 
 -- ================================================
--- 12. PROCEDURE ZA AUTENTIFIKACIJU KORISNIKA
+-- 10. PROCEDURE ZA AUTENTIFIKACIJU KORISNIKA
 -- ================================================
 CREATE PROCEDURE sp_ValidacijaKorisnika
     @Korisnicko_Ime NVARCHAR(50),
@@ -312,7 +326,7 @@ END
 GO
 
 -- ================================================
--- 13. PROCEDURE ZA PREGLED ISTORIJE TRANSAKCIJA
+-- 11. PROCEDURE ZA PREGLED ISTORIJE TRANSAKCIJA
 -- ================================================
 CREATE PROCEDURE sp_GetIstorijaTransakcija
     @DanaUnazad INT = 30
@@ -332,7 +346,7 @@ END
 GO
 
 -- ================================================
--- 14. PROCEDURE ZA DOBIJANJE DOSTUPNIH LOKACIJA
+-- 12. PROCEDURE ZA DOBIJANJE DOSTUPNIH LOKACIJA
 -- ================================================
 CREATE PROCEDURE sp_GetDostupneLokacije
 AS
@@ -349,43 +363,30 @@ END
 GO
 
 -- ================================================
--- 15. PROCEDURE ZA ABC ANALIZU - ISPRAVLJENO
+-- 13. PROCEDURE ZA ABC ANALIZU
+-- Koristi deljeni vw_VrednostZalihe view
 -- ================================================
 CREATE PROCEDURE sp_ABCAnaliza
 AS
 BEGIN
-    WITH temp_zalihe AS (
-        SELECT 
-            a.ArtikalID,
-            a.SifraArtikla,
-            a.NazivArtikla,
-            a.CenaKupovine,
-            SUM(z.Kolicina) AS Kolicina,
-            SUM(z.Kolicina) * a.CenaKupovine AS Vrednost
-        FROM Zalihe z
-        INNER JOIN Artikli a ON z.ArtikalID = a.ArtikalID
-        WHERE a.Aktivan = 1
-        GROUP BY a.ArtikalID, a.SifraArtikla, a.NazivArtikla, a.CenaKupovine
-    ),
-    temp_ukupno AS (
-        SELECT SUM(Vrednost) AS UkupnaVrednost
-        FROM temp_zalihe
-    )
+    DECLARE @UkupnaVrednost DECIMAL(18,2)
+    SELECT @UkupnaVrednost = SUM(VrednostZalihe) FROM vw_VrednostZalihe
+
     SELECT 
-        t.ArtikalID,
-        t.SifraArtikla,
-        t.NazivArtikla,
-        t.Kolicina,
-        t.CenaKupovine,
-        t.Vrednost,
-        CAST(ROUND((t.Vrednost * 100 / u.UkupnaVrednost), 2) AS DECIMAL(5,2)) AS ProcenatVrednosti,
+        ArtikalID,
+        SifraArtikla,
+        NazivArtikla,
+        UkupnaKolicina AS Kolicina,
+        CenaKupovine,
+        VrednostZalihe AS Vrednost,
+        CAST(ROUND((VrednostZalihe * 100 / @UkupnaVrednost), 2) AS DECIMAL(5,2)) AS ProcenatVrednosti,
         CASE 
-            WHEN (t.Vrednost * 100 / u.UkupnaVrednost) >= 80 THEN 'A - Kritična'
-            WHEN (t.Vrednost * 100 / u.UkupnaVrednost) >= 50 THEN 'B - Važna'
+            WHEN (VrednostZalihe * 100 / @UkupnaVrednost) >= 80 THEN 'A - Kritična'
+            WHEN (VrednostZalihe * 100 / @UkupnaVrednost) >= 50 THEN 'B - Važna'
             ELSE 'C - Ostalo'
         END AS Kategorija
-    FROM temp_zalihe t, temp_ukupno u
-    ORDER BY t.Vrednost DESC
+    FROM vw_VrednostZalihe
+    ORDER BY VrednostZalihe DESC
 END
 GO
 

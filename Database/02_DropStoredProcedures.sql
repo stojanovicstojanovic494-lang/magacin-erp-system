@@ -1,9 +1,9 @@
 -- ================================================
--- MAGACIN ERP SISTEM - OBRISATI SVE STORED PROCEDURES
+-- MAGACIN ERP SISTEM - OBRISATI SVE STORED PROCEDURES I VIEWS
 -- SQL Server 2022
 -- ================================================
 
-USE MagacinVinERP
+USE MagacinERP
 GO
 
 -- Obrisati sve postojeće Stored Procedures
@@ -22,6 +22,13 @@ DROP PROCEDURE IF EXISTS sp_ValidacijaKorisnika
 DROP PROCEDURE IF EXISTS sp_GetIstorijaTransakcija
 DROP PROCEDURE IF EXISTS sp_GetDostupneLokacije
 DROP PROCEDURE IF EXISTS sp_ABCAnaliza
+
+-- Obrisati deljene utility procedure
+DROP PROCEDURE IF EXISTS sp_LogAudit
+DROP PROCEDURE IF EXISTS sp_AzurirajZalihe
+
+-- Obrisati deljene views
+DROP VIEW IF EXISTS vw_VrednostZalihe
 GO
 
-PRINT 'Svi Stored Procedures su obrisani!'
+PRINT 'Svi Stored Procedures i Views su obrisani!'
