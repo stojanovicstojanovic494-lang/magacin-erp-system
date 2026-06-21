@@ -129,11 +129,18 @@ GO
 -- ================================================
 -- 10. KORISNICI
 -- ================================================
-INSERT INTO Korisnici (Korisnicko_Ime, Lozinka, ImeKorisnika, Prezime, Email, Uloga, Aktivan) VALUES
-('admin', 'admin123', 'Administratski', 'Korisnik', 'admin@magacin.rs', 'Admin', 1),
-('magaciner', 'magacin123', 'Marko', 'Marković', 'marko@magacin.rs', 'Magaciner', 1),
-('magaciner2', 'magacin123', 'Jovana', 'Jovanović', 'jovana@magacin.rs', 'Magaciner', 1),
-('pregled', 'pregled123', 'Pregleda', 'Korisnik', 'pregled@magacin.rs', 'Pregled', 1)
+-- NOTE: In production, generate unique salts via CRYPT_GEN_RANDOM(32) per user.
+-- These test salts are fixed so the seed script is deterministic.
+DECLARE @Salt1 VARBINARY(32) = 0x0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20
+DECLARE @Salt2 VARBINARY(32) = 0x2122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F40
+DECLARE @Salt3 VARBINARY(32) = 0x4142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F60
+DECLARE @Salt4 VARBINARY(32) = 0x6162636465666768696A6B6C6D6E6F707172737475767778797A7B7C7D7E7F80
+
+INSERT INTO Korisnici (Korisnicko_Ime, LozinkaHash, LozinkaSalt, ImeKorisnika, Prezime, Email, Uloga, Aktivan) VALUES
+('admin',     dbo.fn_HashPassword('admin123', @Salt1),     @Salt1, 'Administratski', 'Korisnik', 'admin@magacin.rs', 'Admin', 1),
+('magaciner', dbo.fn_HashPassword('magacin123', @Salt2),   @Salt2, 'Marko', 'Marković', 'marko@magacin.rs', 'Magaciner', 1),
+('magaciner2',dbo.fn_HashPassword('magacin123', @Salt3),   @Salt3, 'Jovana', 'Jovanović', 'jovana@magacin.rs', 'Magaciner', 1),
+('pregled',   dbo.fn_HashPassword('pregled123', @Salt4),   @Salt4, 'Pregleda', 'Korisnik', 'pregled@magacin.rs', 'Pregled', 1)
 GO
 
 -- ================================================
@@ -169,7 +176,4 @@ PRINT '================================'
 PRINT 'Test podaci su uspešno učitani!'
 PRINT '================================'
 PRINT ''
-PRINT 'Korisnicka imena za testiranje:'
-PRINT '  Admin: admin / admin123'
-PRINT '  Magaciner: magaciner / magacin123'
-PRINT '  Pregled: pregled / pregled123'
+PRINT 'Test korisnici su kreirani (videti dokumentaciju za lozinke).'

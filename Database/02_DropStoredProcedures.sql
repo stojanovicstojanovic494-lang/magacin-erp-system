@@ -3,7 +3,7 @@
 -- SQL Server 2022
 -- ================================================
 
-USE MagacinVinERP
+USE MagacinERP
 GO
 
 -- Obrisati sve postojeće Stored Procedures
