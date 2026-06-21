@@ -330,11 +330,14 @@ GO
 CREATE TABLE Korisnici (
     KorisnikID INT PRIMARY KEY IDENTITY(1,1),
     Korisnicko_Ime NVARCHAR(50) NOT NULL UNIQUE,
-    Lozinka NVARCHAR(255) NOT NULL,
+    LozinkaHash VARBINARY(64) NOT NULL,
+    LozinkaSalt VARBINARY(32) NOT NULL,
     ImeKorisnika NVARCHAR(100) NOT NULL,
     Prezime NVARCHAR(100) NOT NULL,
     Email NVARCHAR(100),
-    Uloga NVARCHAR(50),
+    Uloga NVARCHAR(50) CHECK (Uloga IN ('Admin', 'Magaciner', 'Pregled')),
+    NeuspesniPokusaji INT DEFAULT 0,
+    ZakljucanDo DATETIME NULL,
     Aktivan BIT DEFAULT 1,
     DatumKreiranja DATETIME DEFAULT GETDATE(),
     DatumIzmene DATETIME DEFAULT GETDATE()
@@ -412,10 +415,26 @@ INSERT INTO Zalihe (ArtikalID, LokacijaID, Kolicina, DisponibilnaKolicina) VALUE
 (4, 4, 800, 800)
 GO
 
-INSERT INTO Korisnici (Korisnicko_Ime, Lozinka, ImeKorisnika, Prezime, Email, Uloga, Aktivan) VALUES
-('admin', 'admin123', 'Administratski', 'Korisnik', 'admin@magacin.rs', 'Admin', 1),
-('magaciner', 'magacin123', 'Marko', 'Marković', 'marko@magacin.rs', 'Magaciner', 1),
-('pregled', 'pregled123', 'Pregleda', 'Korisnik', 'pregled@magacin.rs', 'Pregled', 1)
+-- Helper function for password hashing
+CREATE FUNCTION dbo.fn_HashPassword(
+    @Lozinka NVARCHAR(255),
+    @Salt VARBINARY(32)
+)
+RETURNS VARBINARY(64)
+AS
+BEGIN
+    RETURN HASHBYTES('SHA2_256', CONCAT(CAST(@Salt AS NVARCHAR(MAX)), @Lozinka))
+END
+GO
+
+DECLARE @Salt1 VARBINARY(32) = 0x0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20
+DECLARE @Salt2 VARBINARY(32) = 0x2122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F40
+DECLARE @Salt3 VARBINARY(32) = 0x4142434445464748494A4B4C4D4E4F505152535455565758595A5B5C5D5E5F60
+
+INSERT INTO Korisnici (Korisnicko_Ime, LozinkaHash, LozinkaSalt, ImeKorisnika, Prezime, Email, Uloga, Aktivan) VALUES
+('admin',     dbo.fn_HashPassword('admin123', @Salt1),     @Salt1, 'Administratski', 'Korisnik', 'admin@magacin.rs', 'Admin', 1),
+('magaciner', dbo.fn_HashPassword('magacin123', @Salt2),   @Salt2, 'Marko', 'Marković', 'marko@magacin.rs', 'Magaciner', 1),
+('pregled',   dbo.fn_HashPassword('pregled123', @Salt3),   @Salt3, 'Pregleda', 'Korisnik', 'pregled@magacin.rs', 'Pregled', 1)
 GO
 
 -- ================================================
@@ -430,7 +449,4 @@ GO
 PRINT '================================'
 PRINT 'Baza podataka je uspešno kreirana!'
 PRINT '================================'
-PRINT 'Korisnici za testiranje:'
-PRINT '  - admin / admin123'
-PRINT '  - magaciner / magacin123'
-PRINT '  - pregled / pregled123'
+PRINT 'Test korisnici su kreirani (videti dokumentaciju za lozinke).'

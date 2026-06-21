@@ -17,7 +17,10 @@ CREATE PROCEDURE sp_DodajPrijemu
     @PrijemaID INT OUTPUT
 AS
 BEGIN
+    SET NOCOUNT ON
     BEGIN TRY
+        BEGIN TRANSACTION
+
         INSERT INTO PrijemaMaterijala (BrojDokumenta, DobavljacID, Napomena, Status, Korisnik)
         VALUES (@BrojDokumenta, @DobavljacID, @Napomena, 'Otvorena', @Korisnik)
         
@@ -26,9 +29,15 @@ BEGIN
         INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
         VALUES ('PrijemaMaterijala', 'INSERT', CAST(@PrijemaID AS NVARCHAR(100)), 
                 'Broj: ' + @BrojDokumenta, @Korisnik)
+
+        COMMIT TRANSACTION
     END TRY
     BEGIN CATCH
-        RAISERROR('Greška pri dodavanju prijeme', 16, 1)
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+        DECLARE @ErrMsg1 NVARCHAR(4000) = ERROR_MESSAGE()
+        DECLARE @ErrSev1 INT = ERROR_SEVERITY()
+        DECLARE @ErrState1 INT = ERROR_STATE()
+        RAISERROR(@ErrMsg1, @ErrSev1, @ErrState1)
     END CATCH
 END
 GO
@@ -46,22 +55,38 @@ CREATE PROCEDURE sp_DodajPrijemaStavku
     @Korisnik NVARCHAR(100)
 AS
 BEGIN
+    SET NOCOUNT ON
+
+    IF @KolicinaNarudjena <= 0
+    BEGIN
+        RAISERROR('Kolicina mora biti pozitivan broj', 16, 1)
+        RETURN
+    END
+
     BEGIN TRY
+        BEGIN TRANSACTION
+
         INSERT INTO PrijemaStavke (PrijemaID, ArtikalID, KolicinaNarudjena, CenaJedinice, LotBroj, DatumRoka)
         VALUES (@PrijemaID, @ArtikalID, @KolicinaNarudjena, @CenaJedinice, @LotBroj, @DatumRoka)
         
         INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
         VALUES ('PrijemaStavke', 'INSERT', CAST(@PrijemaID AS NVARCHAR(100)), 
                 'Artikal ID: ' + CAST(@ArtikalID AS NVARCHAR(100)), @Korisnik)
+
+        COMMIT TRANSACTION
     END TRY
     BEGIN CATCH
-        RAISERROR('Greška pri dodavanju stavke prijeme', 16, 1)
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+        DECLARE @ErrMsg2 NVARCHAR(4000) = ERROR_MESSAGE()
+        DECLARE @ErrSev2 INT = ERROR_SEVERITY()
+        DECLARE @ErrState2 INT = ERROR_STATE()
+        RAISERROR(@ErrMsg2, @ErrSev2, @ErrState2)
     END CATCH
 END
 GO
 
 -- ================================================
--- 3. PROCEDURE ZA AŽURIRANJE ZALIHA NAKON PRIJEME
+-- 3. PROCEDURE ZA AZURIRANJE ZALIHA NAKON PRIJEME
 -- ================================================
 CREATE PROCEDURE sp_AzurirajZaliheNakonPrijeme
     @ArtikalID INT,
@@ -70,7 +95,17 @@ CREATE PROCEDURE sp_AzurirajZaliheNakonPrijeme
     @Korisnik NVARCHAR(100)
 AS
 BEGIN
+    SET NOCOUNT ON
+
+    IF @Kolicina <= 0
+    BEGIN
+        RAISERROR('Kolicina mora biti pozitivan broj', 16, 1)
+        RETURN
+    END
+
     BEGIN TRY
+        BEGIN TRANSACTION
+
         IF EXISTS (SELECT 1 FROM Zalihe WHERE ArtikalID = @ArtikalID AND LokacijaID = @LokacijaID)
         BEGIN
             UPDATE Zalihe
@@ -88,9 +123,15 @@ BEGIN
         INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
         VALUES ('Zalihe', 'UPDATE', CAST(@ArtikalID AS NVARCHAR(100)), 
                 'Kolicina: ' + CAST(@Kolicina AS NVARCHAR(100)), @Korisnik)
+
+        COMMIT TRANSACTION
     END TRY
     BEGIN CATCH
-        RAISERROR('Greška pri ažuriranju zalihe', 16, 1)
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+        DECLARE @ErrMsg3 NVARCHAR(4000) = ERROR_MESSAGE()
+        DECLARE @ErrSev3 INT = ERROR_SEVERITY()
+        DECLARE @ErrState3 INT = ERROR_STATE()
+        RAISERROR(@ErrMsg3, @ErrSev3, @ErrState3)
     END CATCH
 END
 GO
@@ -106,7 +147,10 @@ CREATE PROCEDURE sp_DodajIzdavanje
     @IzdavanjeID INT OUTPUT
 AS
 BEGIN
+    SET NOCOUNT ON
     BEGIN TRY
+        BEGIN TRANSACTION
+
         INSERT INTO IzdavanjeMaterijala (BrojDokumenta, TipIzdavanja, Napomena, Status, Korisnik)
         VALUES (@BrojDokumenta, @TipIzdavanja, @Napomena, 'Otvorena', @Korisnik)
         
@@ -115,9 +159,15 @@ BEGIN
         INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
         VALUES ('IzdavanjeMaterijala', 'INSERT', CAST(@IzdavanjeID AS NVARCHAR(100)), 
                 'Broj: ' + @BrojDokumenta, @Korisnik)
+
+        COMMIT TRANSACTION
     END TRY
     BEGIN CATCH
-        RAISERROR('Greška pri dodavanju izdavanja', 16, 1)
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+        DECLARE @ErrMsg4 NVARCHAR(4000) = ERROR_MESSAGE()
+        DECLARE @ErrSev4 INT = ERROR_SEVERITY()
+        DECLARE @ErrState4 INT = ERROR_STATE()
+        RAISERROR(@ErrMsg4, @ErrSev4, @ErrState4)
     END CATCH
 END
 GO
@@ -132,7 +182,34 @@ CREATE PROCEDURE sp_SmanjiZalihe
     @Korisnik NVARCHAR(100)
 AS
 BEGIN
+    SET NOCOUNT ON
+
+    IF @Kolicina <= 0
+    BEGIN
+        RAISERROR('Kolicina mora biti pozitivan broj', 16, 1)
+        RETURN
+    END
+
+    DECLARE @TrenutnaKolicina INT
+    SELECT @TrenutnaKolicina = Kolicina
+    FROM Zalihe
+    WHERE ArtikalID = @ArtikalID AND LokacijaID = @LokacijaID
+
+    IF @TrenutnaKolicina IS NULL
+    BEGIN
+        RAISERROR('Zaliha ne postoji za dati artikal i lokaciju', 16, 1)
+        RETURN
+    END
+
+    IF @TrenutnaKolicina < @Kolicina
+    BEGIN
+        RAISERROR('Nedovoljna kolicina na zalihama', 16, 1)
+        RETURN
+    END
+
     BEGIN TRY
+        BEGIN TRANSACTION
+
         UPDATE Zalihe
         SET Kolicina = Kolicina - @Kolicina,
             DisponibilnaKolicina = Kolicina - @Kolicina - RezervovanoKolicina,
@@ -142,9 +219,15 @@ BEGIN
         INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
         VALUES ('Zalihe', 'UPDATE', CAST(@ArtikalID AS NVARCHAR(100)), 
                 'Smanjeno za: ' + CAST(@Kolicina AS NVARCHAR(100)), @Korisnik)
+
+        COMMIT TRANSACTION
     END TRY
     BEGIN CATCH
-        RAISERROR('Greška pri smanjenju zalihe', 16, 1)
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+        DECLARE @ErrMsg5 NVARCHAR(4000) = ERROR_MESSAGE()
+        DECLARE @ErrSev5 INT = ERROR_SEVERITY()
+        DECLARE @ErrState5 INT = ERROR_STATE()
+        RAISERROR(@ErrMsg5, @ErrSev5, @ErrState5)
     END CATCH
 END
 GO
@@ -161,7 +244,17 @@ CREATE PROCEDURE sp_DodajTransfer
     @TransferID INT OUTPUT
 AS
 BEGIN
+    SET NOCOUNT ON
+
+    IF @IzLokacijeID = @ULokacijuID
+    BEGIN
+        RAISERROR('Izvorna i odredisna lokacija ne mogu biti iste', 16, 1)
+        RETURN
+    END
+
     BEGIN TRY
+        BEGIN TRANSACTION
+
         INSERT INTO Transferi (BrojDokumenta, IzLokacijeID, ULokacijuID, Napomena, Status, Korisnik)
         VALUES (@BrojDokumenta, @IzLokacijeID, @ULokacijuID, @Napomena, 'Otvorena', @Korisnik)
         
@@ -170,9 +263,15 @@ BEGIN
         INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
         VALUES ('Transferi', 'INSERT', CAST(@TransferID AS NVARCHAR(100)), 
                 'Broj: ' + @BrojDokumenta, @Korisnik)
+
+        COMMIT TRANSACTION
     END TRY
     BEGIN CATCH
-        RAISERROR('Greška pri dodavanju transfera', 16, 1)
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+        DECLARE @ErrMsg6 NVARCHAR(4000) = ERROR_MESSAGE()
+        DECLARE @ErrSev6 INT = ERROR_SEVERITY()
+        DECLARE @ErrState6 INT = ERROR_STATE()
+        RAISERROR(@ErrMsg6, @ErrSev6, @ErrState6)
     END CATCH
 END
 GO
@@ -188,7 +287,10 @@ CREATE PROCEDURE sp_DodajInventuru
     @InventuraID INT OUTPUT
 AS
 BEGIN
+    SET NOCOUNT ON
     BEGIN TRY
+        BEGIN TRANSACTION
+
         INSERT INTO Inventure (BrojDokumenta, TipInventure, Napomena, Status, Korisnik)
         VALUES (@BrojDokumenta, @TipInventure, @Napomena, 'U_toku', @Korisnik)
         
@@ -197,9 +299,15 @@ BEGIN
         INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
         VALUES ('Inventure', 'INSERT', CAST(@InventuraID AS NVARCHAR(100)), 
                 'Broj: ' + @BrojDokumenta, @Korisnik)
+
+        COMMIT TRANSACTION
     END TRY
     BEGIN CATCH
-        RAISERROR('Greška pri dodavanju inventure', 16, 1)
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+        DECLARE @ErrMsg7 NVARCHAR(4000) = ERROR_MESSAGE()
+        DECLARE @ErrSev7 INT = ERROR_SEVERITY()
+        DECLARE @ErrState7 INT = ERROR_STATE()
+        RAISERROR(@ErrMsg7, @ErrSev7, @ErrState7)
     END CATCH
 END
 GO
@@ -211,6 +319,7 @@ CREATE PROCEDURE sp_GetDostupnaZaliha
     @ArtikalID INT
 AS
 BEGIN
+    SET NOCOUNT ON
     SELECT 
         a.ArtikalID,
         a.SifraArtikla,
@@ -232,6 +341,7 @@ CREATE PROCEDURE sp_GetZalihaPoLokacijama
     @ArtikalID INT
 AS
 BEGIN
+    SET NOCOUNT ON
     SELECT 
         z.LokacijaID,
         sl.Opis AS NazivLokacije,
@@ -251,6 +361,7 @@ GO
 CREATE PROCEDURE sp_GetArtikliSaNiskomZalijhom
 AS
 BEGIN
+    SET NOCOUNT ON
     SELECT 
         a.ArtikalID,
         a.SifraArtikla,
@@ -273,6 +384,7 @@ GO
 CREATE PROCEDURE sp_GetVrednostZalihe
 AS
 BEGIN
+    SET NOCOUNT ON
     SELECT 
         a.SifraArtikla,
         a.NazivArtikla,
@@ -289,6 +401,7 @@ GO
 
 -- ================================================
 -- 12. PROCEDURE ZA AUTENTIFIKACIJU KORISNIKA
+-- Uses salted SHA-256 hash comparison with brute-force lockout.
 -- ================================================
 CREATE PROCEDURE sp_ValidacijaKorisnika
     @Korisnicko_Ime NVARCHAR(50),
@@ -297,16 +410,64 @@ CREATE PROCEDURE sp_ValidacijaKorisnika
     @Uloga NVARCHAR(50) OUTPUT
 AS
 BEGIN
-    SELECT @KorisnikID = KorisnikID, @Uloga = Uloga
+    SET NOCOUNT ON
+    SET @KorisnikID = -1
+    SET @Uloga = NULL
+
+    DECLARE @StoredHash VARBINARY(64)
+    DECLARE @StoredSalt VARBINARY(32)
+    DECLARE @NeuspesniPokusaji INT
+    DECLARE @ZakljucanDo DATETIME
+    DECLARE @TempKorisnikID INT
+
+    SELECT
+        @TempKorisnikID = KorisnikID,
+        @StoredHash = LozinkaHash,
+        @StoredSalt = LozinkaSalt,
+        @NeuspesniPokusaji = NeuspesniPokusaji,
+        @ZakljucanDo = ZakljucanDo
     FROM Korisnici
-    WHERE Korisnicko_Ime = @Korisnicko_Ime 
-    AND Lozinka = @Lozinka 
-    AND Aktivan = 1
-    
-    IF @KorisnikID IS NULL
+    WHERE Korisnicko_Ime = @Korisnicko_Ime AND Aktivan = 1
+
+    IF @TempKorisnikID IS NULL
+        RETURN
+
+    IF @ZakljucanDo IS NOT NULL AND @ZakljucanDo > GETDATE()
     BEGIN
-        SET @KorisnikID = -1
-        SET @Uloga = NULL
+        RAISERROR('Nalog je privremeno zakljucan. Pokusajte ponovo kasnije.', 16, 1)
+        RETURN
+    END
+
+    DECLARE @InputHash VARBINARY(64) = dbo.fn_HashPassword(@Lozinka, @StoredSalt)
+
+    IF @InputHash = @StoredHash
+    BEGIN
+        SET @KorisnikID = @TempKorisnikID
+        SELECT @Uloga = Uloga FROM Korisnici WHERE KorisnikID = @TempKorisnikID
+
+        UPDATE Korisnici
+        SET NeuspesniPokusaji = 0, ZakljucanDo = NULL
+        WHERE KorisnikID = @TempKorisnikID
+
+        INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
+        VALUES ('Korisnici', 'LOGIN', CAST(@TempKorisnikID AS NVARCHAR(100)),
+                'Uspesna prijava', @Korisnicko_Ime)
+    END
+    ELSE
+    BEGIN
+        SET @NeuspesniPokusaji = ISNULL(@NeuspesniPokusaji, 0) + 1
+
+        UPDATE Korisnici
+        SET NeuspesniPokusaji = @NeuspesniPokusaji,
+            ZakljucanDo = CASE WHEN @NeuspesniPokusaji >= 5
+                               THEN DATEADD(MINUTE, 15, GETDATE())
+                               ELSE ZakljucanDo END
+        WHERE KorisnikID = @TempKorisnikID
+
+        INSERT INTO AuditLog (Tabela, Akcija, PrimarniKljuc, NovaVrednost, Korisnik)
+        VALUES ('Korisnici', 'LOGIN_FAIL', CAST(@TempKorisnikID AS NVARCHAR(100)),
+                'Neuspesna prijava (pokusaj ' + CAST(@NeuspesniPokusaji AS NVARCHAR(10)) + ')',
+                @Korisnicko_Ime)
     END
 END
 GO
@@ -318,6 +479,11 @@ CREATE PROCEDURE sp_GetIstorijaTransakcija
     @DanaUnazad INT = 30
 AS
 BEGIN
+    SET NOCOUNT ON
+
+    IF @DanaUnazad <= 0 OR @DanaUnazad > 365
+        SET @DanaUnazad = 30
+
     SELECT TOP 500
         AuditID,
         Tabela,
@@ -337,6 +503,7 @@ GO
 CREATE PROCEDURE sp_GetDostupneLokacije
 AS
 BEGIN
+    SET NOCOUNT ON
     SELECT 
         LokacijaID,
         ZonaID,
@@ -354,13 +521,25 @@ GO
 CREATE PROCEDURE sp_ABCAnaliza
 AS
 BEGIN
+    SET NOCOUNT ON
+
     DECLARE @UkupnaVrednost DECIMAL(18,2)
-    
-    SELECT @UkupnaVrednost = SUM(SUM(z.Kolicina) * a.CenaKupovine)
-    FROM Zalihe z
-    INNER JOIN Artikli a ON z.ArtikalID = a.ArtikalID
-    WHERE a.Aktivan = 1
-    
+
+    SELECT @UkupnaVrednost = SUM(sub.Vrednost)
+    FROM (
+        SELECT SUM(z.Kolicina) * a.CenaKupovine AS Vrednost
+        FROM Zalihe z
+        INNER JOIN Artikli a ON z.ArtikalID = a.ArtikalID
+        WHERE a.Aktivan = 1
+        GROUP BY a.ArtikalID, a.CenaKupovine
+    ) sub
+
+    IF @UkupnaVrednost IS NULL OR @UkupnaVrednost = 0
+    BEGIN
+        RAISERROR('Nema podataka za ABC analizu', 16, 1)
+        RETURN
+    END
+
     SELECT 
         a.ArtikalID,
         a.SifraArtikla,
@@ -370,8 +549,8 @@ BEGIN
         (SUM(z.Kolicina) * a.CenaKupovine) AS Vrednost,
         CAST((SUM(z.Kolicina) * a.CenaKupovine) * 100 / @UkupnaVrednost AS DECIMAL(5,2)) AS ProcenatVrednosti,
         CASE 
-            WHEN CAST((SUM(z.Kolicina) * a.CenaKupovine) * 100 / @UkupnaVrednost AS DECIMAL(5,2)) >= 80 THEN 'A - Kritična'
-            WHEN CAST((SUM(z.Kolicina) * a.CenaKupovine) * 100 / @UkupnaVrednost AS DECIMAL(5,2)) >= 50 THEN 'B - Važna'
+            WHEN CAST((SUM(z.Kolicina) * a.CenaKupovine) * 100 / @UkupnaVrednost AS DECIMAL(5,2)) >= 80 THEN 'A - Kriticna'
+            WHEN CAST((SUM(z.Kolicina) * a.CenaKupovine) * 100 / @UkupnaVrednost AS DECIMAL(5,2)) >= 50 THEN 'B - Vazna'
             ELSE 'C - Ostalo'
         END AS Kategorija
     FROM Zalihe z
@@ -383,5 +562,5 @@ END
 GO
 
 PRINT '================================'
-PRINT 'Stored Procedures su uspešno kreirani!'
+PRINT 'Stored Procedures su uspesno kreirani!'
 PRINT '================================'

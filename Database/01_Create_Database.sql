@@ -145,7 +145,7 @@ CREATE TABLE LotiBrojevi (
     DatumRoka DATE,
     Kolicina INT NOT NULL,
     ZauzecaLokacija INT,
-    Status NVARCHAR(20) DEFAULT 'Dostupan', -- Dostupan, Rezervovan, Izdvan, Istekao
+    Status NVARCHAR(20) DEFAULT 'Dostupan' CHECK (Status IN ('Dostupan', 'Rezervovan', 'Izdat', 'Istekao')),
     DatumKreiranja DATETIME DEFAULT GETDATE(),
     FOREIGN KEY (ArtikalID) REFERENCES Artikli(ArtikalID),
     UNIQUE (ArtikalID, LotBroj)
@@ -173,7 +173,7 @@ CREATE TABLE PrijemaMaterijala (
     DatumPrijeme DATETIME DEFAULT GETDATE(),
     DobavljacID INT NOT NULL,
     Napomena NVARCHAR(500),
-    Status NVARCHAR(20) DEFAULT 'Otvorena', -- Otvorena, Zavrsena, Otkazana
+    Status NVARCHAR(20) DEFAULT 'Otvorena' CHECK (Status IN ('Otvorena', 'Zavrsena', 'Otkazana')),
     Korisnik NVARCHAR(100),
     DatumZavrsenja DATETIME,
     DatumKreiranja DATETIME DEFAULT GETDATE(),
@@ -210,7 +210,7 @@ CREATE TABLE IzdavanjeMaterijala (
     DatumIzdavanja DATETIME DEFAULT GETDATE(),
     TipIzdavanja NVARCHAR(50), -- Proizvodnja, Prodaja, Povracaj, Transfer
     Napomena NVARCHAR(500),
-    Status NVARCHAR(20) DEFAULT 'Otvorena', -- Otvorena, Zavrsena, Otkazana
+    Status NVARCHAR(20) DEFAULT 'Otvorena' CHECK (Status IN ('Otvorena', 'Zavrsena', 'Otkazana')),
     Korisnik NVARCHAR(100),
     DatumZavrsenja DATETIME,
     DatumKreiranja DATETIME DEFAULT GETDATE(),
@@ -247,7 +247,7 @@ CREATE TABLE Transferi (
     IzLokacijeID INT NOT NULL,
     ULokacijuID INT NOT NULL,
     Napomena NVARCHAR(500),
-    Status NVARCHAR(20) DEFAULT 'Otvorena', -- Otvorena, Zavrsena, Otkazana
+    Status NVARCHAR(20) DEFAULT 'Otvorena' CHECK (Status IN ('Otvorena', 'Zavrsena', 'Otkazana')),
     Korisnik NVARCHAR(100),
     DatumZavrsenja DATETIME,
     DatumKreiranja DATETIME DEFAULT GETDATE(),
@@ -283,7 +283,7 @@ CREATE TABLE Inventure (
     DatumInventure DATETIME DEFAULT GETDATE(),
     TipInventure NVARCHAR(20), -- Parcijalna, Potpuna
     Napomena NVARCHAR(500),
-    Status NVARCHAR(20) DEFAULT 'U_toku', -- U_toku, Zavrsena, Otkazana
+    Status NVARCHAR(20) DEFAULT 'U_toku' CHECK (Status IN ('U_toku', 'Zavrsena', 'Otkazana')),
     Korisnik NVARCHAR(100),
     DatumZavrsenja DATETIME,
     DatumKreiranja DATETIME DEFAULT GETDATE(),
@@ -351,11 +351,14 @@ GO
 CREATE TABLE Korisnici (
     KorisnikID INT PRIMARY KEY IDENTITY(1,1),
     Korisnicko_Ime NVARCHAR(50) NOT NULL UNIQUE,
-    Lozinka NVARCHAR(255) NOT NULL,
+    LozinkaHash VARBINARY(64) NOT NULL,
+    LozinkaSalt VARBINARY(32) NOT NULL,
     ImeKorisnika NVARCHAR(100) NOT NULL,
     Prezime NVARCHAR(100) NOT NULL,
     Email NVARCHAR(100),
-    Uloga NVARCHAR(50), -- Admin, Magaciner, Pregled
+    Uloga NVARCHAR(50) CHECK (Uloga IN ('Admin', 'Magaciner', 'Pregled')),
+    NeuspesniPokusaji INT DEFAULT 0,
+    ZakljucanDo DATETIME NULL,
     Aktivan BIT DEFAULT 1,
     DatumKreiranja DATETIME DEFAULT GETDATE(),
     DatumIzmene DATETIME DEFAULT GETDATE()
@@ -403,6 +406,20 @@ CREATE INDEX IDX_LotiBrojevi_Artikal ON LotiBrojevi(ArtikalID)
 CREATE INDEX IDX_AuditLog_Datum ON AuditLog(DatumAkcije)
 CREATE INDEX IDX_Korisnici_Korisnicko_Ime ON Korisnici(Korisnicko_Ime)
 
+GO
+
+-- ================================================
+-- HELPER FUNCTION: HASH PASSWORD WITH SALT
+-- ================================================
+CREATE FUNCTION dbo.fn_HashPassword(
+    @Lozinka NVARCHAR(255),
+    @Salt VARBINARY(32)
+)
+RETURNS VARBINARY(64)
+AS
+BEGIN
+    RETURN HASHBYTES('SHA2_256', CONCAT(CAST(@Salt AS NVARCHAR(MAX)), @Lozinka))
+END
 GO
 
 PRINT 'Baza podataka je uspešno kreirana!'
