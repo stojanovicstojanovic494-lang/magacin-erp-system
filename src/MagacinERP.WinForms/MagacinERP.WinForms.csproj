@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="..\MagacinERP.Core\MagacinERP.Core.csproj" />
     <ProjectReference Include="..\MagacinERP.Services\MagacinERP.Services.csproj" />
+    <ProjectReference Include="..\MagacinERP.DataAccess\MagacinERP.DataAccess.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,3 +1,5 @@
+using MagacinERP.WinForms.Forms;
+
 namespace MagacinERP.WinForms;
 
 static class Program
@@ -6,6 +8,6 @@ static class Program
     static void Main()
     {
         ApplicationConfiguration.Initialize();
-        Application.Run(new Forms.FrmLogin());
+        Application.Run(new FrmLogin());
     }
 }
